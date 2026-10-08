@@ -312,11 +312,13 @@
   // next one, and one the other way turns back. Past the finale the page scrolls on into the
   // sections as usual. Anything else that leaves the page between two stops (dragging the
   // scrollbar, a restored scroll position) flies on to the nearest stop once it settles.
-  // A page transition (site.js) sets "is-jumping" on <html> while it moves the visitor.
+  // A page transition (site.js) sets "is-jumping" on <html> while it moves the visitor, and
+  // while a pop-up (a modal <dialog>) is open the film takes no gestures.
   const FRESH_MS = 140; // a pause this long between wheel events starts a new gesture
   const IDLE_MS = 160;
   const lastStop = cfg.moves.length;
   const jumping = () => document.documentElement.classList.contains("is-jumping");
+  const paused = () => jumping() || !!document.querySelector("dialog[open]");
   // Where the page rests on each stop: the top for the opening, otherwise inside its hold.
   const restAt = (stop) => {
     const h = holds.get(stop);
@@ -462,7 +464,7 @@
 
   let lastWheel = 0, wheelUsed = false;
   window.addEventListener("wheel", (e) => {
-    if (e.ctrlKey || jumping()) return; // ctrl+wheel is pinch zoom
+    if (e.ctrlKey || paused()) return; // ctrl+wheel is pinch zoom
     const dy = e.deltaMode === 1 ? e.deltaY * 32 : e.deltaMode === 2 ? e.deltaY * vh : e.deltaY;
     if (!dy) return;
     const now = performance.now();
@@ -485,7 +487,7 @@
     touchNative = false;
   }, { passive: true });
   window.addEventListener("touchmove", (e) => {
-    if (touchY === null || touchNative || jumping()) return;
+    if (touchY === null || touchNative || paused()) return;
     const dy = touchY - e.touches[0].clientY;
     if (!dy) return;
     const d = dy > 0 ? 1 : -1;
@@ -497,7 +499,7 @@
   }, { passive: false });
 
   window.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || jumping() || !inside()) return;
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || paused() || !inside()) return;
     if (e.target.closest && e.target.closest("input, textarea, select, button, [contenteditable]")) return;
     const d = e.key === "ArrowDown" || e.key === "PageDown" || (e.key === " " && !e.shiftKey) ? 1
       : e.key === "ArrowUp" || e.key === "PageUp" || (e.key === " " && e.shiftKey) ? -1 : 0;
@@ -510,7 +512,7 @@
   // between two stops, fly on in the direction it was going.
   let idle = 0, held = false;
   const settleBetween = () => {
-    if (held || flight || jumping() || !inside()) return;
+    if (held || flight || paused() || !inside()) return;
     if (resolve(position()).kind === "move") go(dir);
   };
   window.addEventListener("scroll", () => {

@@ -6,6 +6,8 @@
  *   eased scroll otherwise.
  * - Links out to Studio (sign in, claim) close the curtain before the browser leaves.
  * - The sections after the film rise into view as they arrive.
+ * - The offer pop-up opens once a visit, at the first calm moment after a few seconds, or
+ *   straight away for a link to #offer. While it's open the film hears no gestures.
  * While it moves the visitor it sets "is-jumping" on <html>, which film.js respects.
  */
 (() => {
@@ -128,12 +130,98 @@
     if (e.persisted && curtain) { reset(); root.classList.remove("is-jumping"); }
   });
 
+  // Offer pop-up
+  const offer = document.getElementById("offer");
+  const canOffer = !!(offer && typeof offer.showModal === "function");
+  const OFFER_AFTER = 4000; // ms after load before it may open
+  const SEEN = "bttrfly-offer-seen";
+  const offerSeen = () => { try { return sessionStorage.getItem(SEEN) === "1"; } catch (e) { return false; } };
+  const markOfferSeen = () => { try { sessionStorage.setItem(SEEN, "1"); } catch (e) { /* storage blocked */ } };
+  let leaving = 0;
+  const showOffer = () => {
+    if (!canOffer || offer.open) return;
+    markOfferSeen();
+    clearTimeout(leaving);
+    offer.classList.remove("leaving");
+    offer.showModal();
+  };
+  const closeOffer = (now) => {
+    if (!canOffer || !offer.open) return;
+    clearTimeout(leaving);
+    if (now || reduced) { offer.close(); return; }
+    offer.classList.add("leaving");
+    leaving = setTimeout(() => offer.close(), 200);
+  };
+  if (canOffer) {
+    offer.querySelector(".offer-close").addEventListener("click", () => closeOffer());
+    // A click beside the card lands on the dialog itself.
+    offer.addEventListener("click", (e) => { if (e.target === offer) closeOffer(); });
+    // Escape. Chrome sometimes makes this event uncancelable, and then the dialog just closes.
+    offer.addEventListener("cancel", (e) => { if (e.cancelable) { e.preventDefault(); closeOffer(); } });
+    offer.addEventListener("close", () => { clearTimeout(leaving); offer.classList.remove("leaving"); });
+
+    const copy = offer.querySelector(".offer-copy");
+    const code = offer.querySelector(".offer-code code");
+    let copyReset = 0;
+    copy.addEventListener("click", async () => {
+      const text = code.textContent.trim();
+      let done = false;
+      try { await navigator.clipboard.writeText(text); done = true; } catch (e) { /* no clipboard access here */ }
+      if (!done) {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try { done = document.execCommand("copy"); } catch (e) { /* leave it selected */ }
+      }
+      copy.textContent = done ? "Copied" : "Selected";
+      clearTimeout(copyReset);
+      copyReset = setTimeout(() => { copy.textContent = "Copy"; }, 2400);
+    });
+
+    // While it's open, gestures reach neither the film (these capture listeners run before
+    // film.js's) nor the page behind; the dialog itself scrolls only if it's taller than the
+    // screen.
+    const still = (e) => {
+      if (!offer.open) return;
+      e.stopImmediatePropagation();
+      if (e.cancelable && offer.scrollHeight <= offer.clientHeight + 1) e.preventDefault();
+    };
+    window.addEventListener("wheel", still, { capture: true, passive: false });
+    window.addEventListener("touchmove", still, { capture: true, passive: false });
+    window.addEventListener("keydown", (e) => {
+      if (!offer.open) return;
+      e.stopImmediatePropagation();
+      const scrollKey = /^(?: |PageDown|PageUp|ArrowDown|ArrowUp|Home|End)$/.test(e.key);
+      if (scrollKey && !(e.target.closest && e.target.closest("button")) && offer.scrollHeight <= offer.clientHeight + 1) e.preventDefault();
+    }, true);
+
+    // Open at the first calm moment: no flight, jump or scroll in the last second.
+    let moved = 0;
+    window.addEventListener("scroll", () => { moved = performance.now(); }, { passive: true });
+    const offerWhenCalm = () => {
+      if (offer.open || offerSeen()) return;
+      if (root.classList.contains("is-jumping") || performance.now() - moved < 1000) { setTimeout(offerWhenCalm, 600); return; }
+      showOffer();
+    };
+    if (location.hash === "#offer") showOffer();
+    else setTimeout(offerWhenCalm, OFFER_AFTER);
+  }
+
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest && e.target.closest("a[href]");
     if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
     const url = new URL(a.getAttribute("href"), location.href);
     const samePage = url.origin === location.origin && url.pathname === location.pathname && url.search === location.search;
+    if (samePage && url.hash === "#offer" && canOffer) {
+      e.preventDefault();
+      showOffer();
+      return;
+    }
+    // The pop-up sits above everything, the curtain included, so it goes first.
+    if (canOffer && offer.open && offer.contains(a)) closeOffer(true);
     if (samePage && url.hash) {
       const el = document.getElementById(decodeURIComponent(url.hash.slice(1)));
       if (!el) return;
