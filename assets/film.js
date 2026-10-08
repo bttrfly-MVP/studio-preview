@@ -336,18 +336,34 @@
     return p > rest + 0.01 ? here : here > 0 ? here - 1 : -1;
   };
 
-  // A flight takes about 1.5 seconds for a short dive and 3 for the longest move.
-  // Forward flights play the move as video at that pace, which every browser draws smoothly,
-  // easing in and out, and the page's scroll position follows the video so the cards and the
-  // progress bar keep up. Flights backwards (and any whose video hasn't loaded yet) scrub the
-  // video on their own timeline instead, where the bits of hold at either end, with the
-  // camera standing still, pass in a blink so the camera sets off at once.
-  const moveSeconds = (k) => Math.min(3, Math.max(1.2, 0.45 + cfg.moves[k].dur * 0.22));
+  // Forward flights play the move as video, which every browser draws smoothly, and the
+  // page's scroll position follows the video so the cards and the progress bar keep up.
+  // Where people are on screen the film keeps its own speed: the first second leaving a stop
+  // and the last two arriving at the next play in real time. Only the stretch in between,
+  // mostly the camera travelling over the neighbourhood, speeds up, smoothly and by about
+  // three times at most. Flights backwards (and any whose video hasn't loaded yet) scrub the
+  // video on their own timeline instead, briskly, since footage running backwards looks odd
+  // at its own pace; the bits of hold at either end, where the camera stands still, pass in
+  // a blink.
+  const DEPART = 0.8, ARRIVE = 2, EASE = 0.8; // seconds of footage
+  const cruise = (k) => {
+    const middle = Math.max(0, cfg.moves[k].dur - DEPART - ARRIVE);
+    return Math.min(3.2, Math.max(1.2, middle / (1.2 + middle * 0.12)));
+  };
+  // Real time for DEPART seconds, easing up to cruise, then easing back down so the last
+  // ARRIVE seconds are real time again.
+  const paceAt = (k, t) => {
+    const dur = cfg.moves[k].dur;
+    const up = smooth(DEPART, DEPART + EASE, t), down = 1 - smooth(dur - ARRIVE - EASE, dur - ARRIVE, t);
+    return 1 + (cruise(k) - 1) * Math.min(up, down);
+  };
+  const scrubSeconds = (k) => Math.min(3, Math.max(1.2, 0.45 + cfg.moves[k].dur * 0.22));
   const HOLD_SECONDS = 0.06; // per viewport height of hold
+  const BOOST_FADE = 0.4; // seconds for a burst of extra speed to die away
   const movePieces = new Map(pieces.filter((piece) => piece.kind === "move").map((piece) => [piece.k, piece]));
   // Soft ends: it sets off at about three quarters speed rather than from a standstill.
   const ease = (x) => x - (Math.sin(2 * Math.PI * x) / (2 * Math.PI)) * 0.3;
-  let flight = null, raf = 0, queued = 0;
+  let flight = null, raf = 0;
   let lastP = position(), dir = 1;
   const along = (f, x) => {
     let t = ease(x) * f.total;
@@ -362,23 +378,23 @@
     flight = null;
     raf = 0;
     lastP = position();
-    if (queued) { const d = queued; queued = 0; go(d); }
   };
   const step = (t) => {
     const f = flight;
     if (!f || jumping()) {
       if (f && f.video) { f.video.pause(); playing = -1; }
-      flight = null; raf = 0; queued = 0;
+      flight = null; raf = 0;
       return;
     }
+    const dt = Math.min(0.05, Math.max(0, (t - f.last) / 1000));
+    f.last = t;
+    f.boost *= Math.exp(-dt / BOOST_FADE);
     if (f.video) {
       const v = f.video, piece = movePieces.get(f.k), dur = cfg.moves[f.k].dur;
       const done = v.ended || v.currentTime >= dur - 0.04;
       if (!done) {
-        // Ease in over the first quarter second and out over the last half second.
-        const into = (t - f.start) / 250, left = (dur - v.currentTime) / f.pace / 0.5;
-        const rate = f.pace * Math.min(1, 0.45 + 0.55 * into) * Math.min(1, 0.35 + 0.65 * left);
-        if (Math.abs(v.playbackRate - rate) > f.pace * 0.04) setRate(v, Math.max(0.3, rate));
+        const rate = paceAt(f.k, v.currentTime) * (1 + f.boost);
+        if (Math.abs(v.playbackRate - rate) > 0.04) setRate(v, rate);
       }
       window.scrollTo(0, section.offsetTop + (done ? f.to : piece.a + (v.currentTime / dur) * (piece.b - piece.a)) * vh);
       if (!done) { raf = requestAnimationFrame(step); return; }
@@ -387,9 +403,9 @@
       landed();
       return;
     }
-    const x = Math.min(1, (t - f.start) / (f.total * 1000));
-    window.scrollTo(0, section.offsetTop + along(f, x) * vh);
-    if (x < 1) { raf = requestAnimationFrame(step); return; }
+    f.x = Math.min(1, f.x + (dt / f.total) * (1 + f.boost));
+    window.scrollTo(0, section.offsetTop + along(f, f.x) * vh);
+    if (f.x < 1) { raf = requestAnimationFrame(step); return; }
     landed();
   };
   const playTo = (stop) => {
@@ -398,8 +414,8 @@
     const from = p > piece.a ? ((p - piece.a) / (piece.b - piece.a)) * dur : 0;
     state[k].want = from;
     if (Math.abs(v.currentTime - from) > 0.04) v.currentTime = from;
-    const f = { video: v, k, to: restAt(stop), back: k, dir: 1, start: performance.now(), pace: dur / moveSeconds(k) };
-    setRate(v, f.pace * 0.45);
+    const f = { video: v, k, to: restAt(stop), back: k, dir: 1, last: performance.now(), boost: 0 };
+    setRate(v, paceAt(k, from));
     flight = f;
     playing = k;
     const started = v.play();
@@ -419,25 +435,26 @@
     for (const piece of pieces) {
       const a = Math.max(lo, piece.a), b = Math.min(hi, piece.b);
       if (b - a < 1e-6) continue;
-      const secs = piece.kind === "move" ? ((b - a) / (piece.b - piece.a)) * moveSeconds(piece.k) : (b - a) * HOLD_SECONDS;
+      const secs = piece.kind === "move" ? ((b - a) / (piece.b - piece.a)) * scrubSeconds(piece.k) : (b - a) * HOLD_SECONDS;
       segs.push(to > from ? { from: a, to: b, secs } : { from: b, to: a, secs });
     }
     if (to < from) segs.reverse();
     const back = to > from ? stop - 1 : stop < lastStop ? stop + 1 : -1; // the stop it set off from
-    flight = { segs, total: segs.reduce((n, seg) => n + seg.secs, 0), to, back, dir: to > from ? 1 : -1, start: performance.now() };
+    flight = { segs, total: segs.reduce((n, seg) => n + seg.secs, 0), to, back, dir: to > from ? 1 : -1, last: performance.now(), x: 0, boost: 0 };
     if (!raf) raf = requestAnimationFrame(step);
   };
   const go = (d) => {
     const stop = nextStop(d);
     if (stop >= 0) flyTo(stop);
   };
-  const turnBack = () => { queued = 0; if (flight && flight.back >= 0) flyTo(flight.back); };
-  // One gesture, one flight: queue a new gesture made during a flight, turn back on one the
-  // other way, and ignore the rest of the gesture that started it (trackpad momentum).
+  const turnBack = () => { if (flight && flight.back >= 0) flyTo(flight.back); };
+  // One gesture, one flight, always to the next stop. A new gesture the same way during a
+  // flight speeds it up for a moment (scrolling works as a throttle), one the other way turns
+  // back, and the rest of the gesture that started it (trackpad momentum) is ignored.
   const steer = (d, fresh) => {
     if (flight) {
       if (!fresh) return;
-      if (d !== flight.dir) turnBack(); else queued = d;
+      if (d !== flight.dir) turnBack(); else flight.boost = Math.min(3, flight.boost + 1.5);
       return;
     }
     if (fresh) go(d);
