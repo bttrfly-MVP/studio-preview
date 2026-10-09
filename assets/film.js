@@ -84,7 +84,11 @@
 
   // One video element per move, stacked; only the active one is visible.
   let touched = false;
-  const prime = (v) => { v.play().then(() => v.pause()).catch(() => {}); };
+  // A muted, inline play() is refused only when the device forbids video outright (iOS
+  // Low Power Mode, autoplay switched off). Seeking a paused video paints nothing there
+  // either, so the film falls back to its stills (enterStills, below).
+  const refused = (e) => { if (e && e.name === "NotAllowedError") enterStills(); };
+  const prime = (v) => { v.play().then(() => v.pause()).catch(refused); };
   const vids = cfg.moves.map(() => {
     const v = document.createElement("video");
     v.muted = true;
@@ -154,7 +158,7 @@
     idle.at = 0;
     const first = idle.clips[0];
     first.v.currentTime = 0; // its first frame is the frame the camera just stopped on
-    first.v.play().catch(() => {});
+    first.v.play().catch(refused);
     first.v.classList.add("on");
     if (idle.clips.length > 1) idle.clips[1].v.currentTime = 0;
     loopStop = stop;
@@ -185,6 +189,53 @@
     }
     poster.classList.remove("gone");
     visibleK = -1; // so the next ready video takes over from the still
+  };
+
+  // Stills mode: no video at all, each stop's still crossfading into the next as the
+  // visitor passes between them. Two images take turns in front, so the incoming one
+  // fades in over the outgoing one and never over a blank frame.
+  let stillsMode = false;
+  let fadeStop = -1;
+  let stillFront = poster;
+  let stillBack = null;
+  const fadeToStill = (stop) => {
+    if (stop === fadeStop) return;
+    fadeStop = stop;
+    if (!stillBack) {
+      stillBack = document.createElement("img");
+      stillBack.className = "film-poster gone";
+      stillBack.alt = "";
+      stillBack.setAttribute("aria-hidden", "true");
+      poster.after(stillBack);
+    }
+    const incoming = stillBack, outgoing = stillFront;
+    const url = base + cfg.stops[stop][variant];
+    const show = () => {
+      if (fadeStop !== stop) return;
+      incoming.style.zIndex = "3";
+      outgoing.style.zIndex = "2";
+      incoming.classList.remove("gone");
+      stillFront = incoming;
+      stillBack = outgoing;
+      setTimeout(() => { if (stillFront === incoming) outgoing.classList.add("gone"); }, 350);
+    };
+    if (incoming.src === url && incoming.complete) show();
+    else { incoming.onload = show; incoming.src = url; }
+  };
+  const enterStills = () => {
+    if (stillsMode) return;
+    stillsMode = true;
+    canPlay = false; // flights from here on move the page only
+    stopLoop();
+    // A flight that was playing video would wait forever on a paused clip: carry it on
+    // as a page-only flight to the same stop.
+    const cut = flight && flight.video ? flight.k + 1 : -1;
+    vids.forEach((v) => { v.classList.remove("on"); v.pause(); });
+    playing = -1;
+    visibleK = -1;
+    poster.classList.remove("gone");
+    section.classList.add("stills");
+    if (cut >= 0) { flight = null; flyTo(cut); }
   };
 
   const settle = (k) => {
@@ -243,7 +294,9 @@
     if (flight || !Number.isFinite(shown) || Math.abs(target - shown) < 0.0005) shown = target;
 
     const piece = resolve(shown);
-    if (playing >= 0) {
+    if (stillsMode) {
+      fadeToStill(piece.kind === "hold" ? piece.stop : (shown - piece.a < (piece.b - piece.a) / 2 ? piece.k : piece.k + 1));
+    } else if (playing >= 0) {
       // A forward flight is playing this move as video: nothing to seek, just show it.
       if (playing !== activeK) { activeK = playing; pump(); }
       loadLoop(playing + 1);
@@ -422,7 +475,15 @@
     playing = k;
     const started = v.play();
     // If the browser won't play it (iOS Low Power Mode, say), scrub from now on.
-    if (started) started.catch(() => { canPlay = false; if (flight === f) { playing = -1; flight = null; flyTo(stop); } });
+    // An AbortError is only this play() cut short by our own pause (a turn back), so the
+    // video still works; it used to switch every later flight to scrubbing. NotAllowedError
+    // is Low Power Mode, where the stills take over.
+    if (started) started.catch((e) => {
+      if (e && e.name === "AbortError") return;
+      refused(e);
+      canPlay = false;
+      if (flight === f) { playing = -1; flight = null; flyTo(stop); }
+    });
     if (!raf) raf = requestAnimationFrame(step);
   };
   let canPlay = true;
