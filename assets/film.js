@@ -36,6 +36,12 @@
   const portrait = window.innerWidth / window.innerHeight < 0.8;
   const dense = Math.max(window.screen.width, window.screen.height) * (window.devicePixelRatio || 1) >= 2400;
   const order = portrait ? (hevc ? ["mh", "m"] : ["m"]) : (hevc && dense ? ["h", "d"] : ["d"]);
+  // Safari, and every browser on iOS, play video through Apple's AVFoundation, which
+  // stutters each time playbackRate changes and is only smooth up to 2x. Flights there
+  // follow the same pace curve in coarse steps and top out at 2x (rateFor, below).
+  const ua = navigator.userAgent;
+  const appleMedia = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ||
+    (/Version\/[\d.]+.*Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS/.test(ua));
   const choices = (entry) => order.filter((key) => entry[key]).map((key) => base + entry[key]);
 
   // Fetch a clip whole (so seeking never waits on the network) into a video element,
@@ -283,6 +289,7 @@
 
   let shown = position();
   let last = performance.now();
+  let lastBar = "", lastHint = ""; // what the progress bar and the hint were last given
   let warmed = 0;
 
   const frame = (now) => {
@@ -339,7 +346,9 @@
       }
     }
 
-    // Cards: each one lives on its stop's hold, easing in and out around it.
+    // Cards: each one lives on its stop's hold, easing in and out around it. Styles are
+    // only written when they change: rewriting all of them every frame kept Safari
+    // recalculating style for cards that were not moving.
     for (const card of cards) {
       const stop = Number(card.dataset.stop);
       const h = holds.get(stop);
@@ -347,13 +356,20 @@
       const inn = stop === 0 ? 1 : smooth(h.a - 0.4, h.a + 0.08, shown);
       const out = stop === cfg.stops.length - 1 ? 1 : 1 - smooth(h.b - 0.08, h.b + 0.4, shown);
       const o = Math.min(inn, out);
-      card.style.opacity = o.toFixed(3);
+      const key = o.toFixed(3);
+      if (card.dataset.o === key) continue;
+      card.dataset.o = key;
+      card.style.opacity = key;
       card.style.visibility = o < 0.01 ? "hidden" : "visible";
       card.style.pointerEvents = o > 0.6 ? "auto" : "none";
       card.style.translate = "0 " + ((1 - o) * 18).toFixed(1) + "px";
     }
-    bar.style.width = ((shown / length) * 100).toFixed(2) + "%";
-    if (hint) hint.style.opacity = (1 - smooth(0.02, 0.2, shown)).toFixed(3);
+    const barWidth = ((shown / length) * 100).toFixed(2) + "%";
+    if (barWidth !== lastBar) bar.style.width = lastBar = barWidth;
+    if (hint) {
+      const hintOpacity = (1 - smooth(0.02, 0.2, shown)).toFixed(3);
+      if (hintOpacity !== lastHint) hint.style.opacity = lastHint = hintOpacity;
+    }
 
     requestAnimationFrame(frame);
   };
@@ -429,6 +445,9 @@
     return f.to;
   };
   const setRate = (v, rate) => { try { v.playbackRate = rate; } catch (e) { /* out of this browser's range */ } };
+  // 1x, 1.5x or 2x on Apple's player, so a flight changes speed about four times
+  // instead of on nearly every frame of its ramps.
+  const rateFor = (rate) => (appleMedia ? Math.min(2, Math.max(1, Math.round(rate * 2) / 2)) : rate);
   const landed = () => {
     flight = null;
     raf = 0;
@@ -448,7 +467,7 @@
       const v = f.video, piece = movePieces.get(f.k), dur = cfg.moves[f.k].dur;
       const done = v.ended || v.currentTime >= dur - 0.04;
       if (!done) {
-        const rate = paceAt(f.k, v.currentTime) * (1 + f.boost);
+        const rate = rateFor(paceAt(f.k, v.currentTime) * (1 + f.boost));
         if (Math.abs(v.playbackRate - rate) > 0.04) setRate(v, rate);
       }
       window.scrollTo(0, section.offsetTop + (done ? f.to : piece.a + (v.currentTime / dur) * (piece.b - piece.a)) * vh);
@@ -470,7 +489,7 @@
     state[k].want = from;
     if (Math.abs(v.currentTime - from) > 0.04) v.currentTime = from;
     const f = { video: v, k, to: restAt(stop), back: k, dir: 1, last: performance.now(), boost: 0 };
-    setRate(v, paceAt(k, from));
+    setRate(v, rateFor(paceAt(k, from)));
     flight = f;
     playing = k;
     const started = v.play();
