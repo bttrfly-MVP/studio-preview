@@ -1,13 +1,17 @@
 /*
- * Page motion for the bttrfly Studio landing page.
- * - The header highlight slides to the link under the pointer and rests on the section in view.
+ * Page motion for the bttrfly Studio landing page and its pricing page.
+ * - The header highlight slides to the link under the pointer and rests on the section in view
+ *   (on the pricing page it rests on Pricing).
  * - Links within the page move the visitor behind a curtain when the trip crosses the film
  *   (scrubbing the whole film past in a second looks broken) or is long, and with a short
  *   eased scroll otherwise.
- * - Links out to Studio (sign in, claim) close the curtain before the browser leaves.
+ * - Links to the other page, and out to Studio (sign in, claim), close the curtain before the
+ *   browser leaves.
  * - The sections after the film rise into view as they arrive.
- * - The offer pop-up opens once a visit, at the first calm moment after a few seconds, or
- *   straight away for a link to #offer. While it's open the film hears no gestures.
+ * - The offer pop-up shows once a visit, never by itself over the film: the first time a
+ *   "Get started" button (data-offer) is clicked, in place of leaving, or shortly after
+ *   arriving on the pricing page. A link to #offer opens it any time. While it's open the
+ *   film hears no gestures.
  * While it moves the visitor it sets "is-jumping" on <html>, which film.js respects.
  */
 (() => {
@@ -19,10 +23,13 @@
   const pills = document.querySelector(".nav-pills");
   const glow = pills && pills.querySelector(".nav-glow");
   const links = pills ? Array.from(pills.querySelectorAll("a.text")) : [];
+  const onPricing = !!document.querySelector("[data-page='pricing']");
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // Header highlight
-  let active = null;
+  // Header highlight. A link marked as the current page keeps it; otherwise it follows the
+  // section in view.
+  const pinned = links.find((a) => a.getAttribute("aria-current") === "page") || null;
+  let active = pinned;
   let hovering = null;
   const place = (a) => {
     if (!glow) return;
@@ -38,8 +45,13 @@
   });
   if (pills) pills.addEventListener("pointerleave", () => { hovering = null; place(active); });
 
-  const targets = links.map((a) => (a.hash ? document.getElementById(a.hash.slice(1)) : null));
+  const samePath = (url) => url.origin === location.origin && url.pathname === location.pathname && url.search === location.search;
+  const targets = links.map((a) => {
+    const url = new URL(a.getAttribute("href"), location.href);
+    return samePath(url) && url.hash ? document.getElementById(url.hash.slice(1)) : null;
+  });
   const updateActive = () => {
+    if (pinned) return;
     const line = window.innerHeight * 0.4;
     let found = null;
     targets.forEach((section, i) => {
@@ -60,6 +72,11 @@
     requestAnimationFrame(() => { queued = false; updateActive(); });
   }, { passive: true });
   window.addEventListener("resize", () => place(hovering || active));
+  if (pinned) {
+    place(pinned);
+    // The link widths change once the web font arrives.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => place(hovering || active));
+  }
   updateActive();
 
   // Curtain
@@ -101,9 +118,9 @@
     if (busy) return;
     busy = true;
     root.classList.add("is-jumping");
-    const y = Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY));
+    const y = el ? Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY)) : 0;
     const far = Math.abs(y - window.scrollY) > window.innerHeight * 1.6;
-    if (hash !== location.hash) history.pushState(null, "", hash);
+    if (hash !== location.hash) history.pushState(null, "", hash || location.pathname + location.search);
     if (reduced || !curtain) {
       window.scrollTo(0, y);
     } else if (inFilm(window.scrollY) || inFilm(y) || far) {
@@ -118,9 +135,9 @@
     busy = false;
   };
 
-  const leave = async (href) => {
+  const leave = async (href, text) => {
     root.classList.add("is-jumping");
-    await cover("Opening bttrfly Studio");
+    await cover(text);
     window.location.href = href;
     // If the browser didn't leave (a blocked or cancelled navigation), give the page back.
     setTimeout(() => { reset(); root.classList.remove("is-jumping"); }, 4000);
@@ -133,7 +150,6 @@
   // Offer pop-up
   const offer = document.getElementById("offer");
   const canOffer = !!(offer && typeof offer.showModal === "function");
-  const OFFER_AFTER = 4000; // ms after load before it may open
   const SEEN = "bttrfly-offer-seen";
   const offerSeen = () => { try { return sessionStorage.getItem(SEEN) === "1"; } catch (e) { return false; } };
   const markOfferSeen = () => { try { sessionStorage.setItem(SEEN, "1"); } catch (e) { /* storage blocked */ } };
@@ -162,6 +178,7 @@
 
     const copy = offer.querySelector(".offer-copy");
     const code = offer.querySelector(".offer-code code");
+    const copyLabel = copy.textContent;
     let copyReset = 0;
     copy.addEventListener("click", async () => {
       const text = code.textContent.trim();
@@ -177,7 +194,7 @@
       }
       copy.textContent = done ? "Copied" : "Selected";
       clearTimeout(copyReset);
-      copyReset = setTimeout(() => { copy.textContent = "Copy"; }, 2400);
+      copyReset = setTimeout(() => { copy.textContent = copyLabel; }, 2400);
     });
 
     // While it's open, gestures reach neither the film (these capture listeners run before
@@ -197,16 +214,9 @@
       if (scrollKey && !(e.target.closest && e.target.closest("button")) && offer.scrollHeight <= offer.clientHeight + 1) e.preventDefault();
     }, true);
 
-    // Open at the first calm moment: no flight, jump or scroll in the last second.
-    let moved = 0;
-    window.addEventListener("scroll", () => { moved = performance.now(); }, { passive: true });
-    const offerWhenCalm = () => {
-      if (offer.open || offerSeen()) return;
-      if (root.classList.contains("is-jumping") || performance.now() - moved < 1000) { setTimeout(offerWhenCalm, 600); return; }
-      showOffer();
-    };
     if (location.hash === "#offer") showOffer();
-    else setTimeout(offerWhenCalm, OFFER_AFTER);
+    // On the pricing page, once the plans have had a moment on screen.
+    else if (onPricing && !offerSeen()) setTimeout(() => { if (!offerSeen()) showOffer(); }, 1400);
   }
 
   document.addEventListener("click", (e) => {
@@ -214,29 +224,47 @@
     const a = e.target.closest && e.target.closest("a[href]");
     if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
     const url = new URL(a.getAttribute("href"), location.href);
-    const samePage = url.origin === location.origin && url.pathname === location.pathname && url.search === location.search;
+    const samePage = samePath(url);
+    const inOffer = canOffer && offer.open && offer.contains(a);
     if (samePage && url.hash === "#offer" && canOffer) {
       e.preventDefault();
       showOffer();
       return;
     }
+    // The first "Get started" of a visit shows the offer instead; its own button carries on.
+    if (a.hasAttribute("data-offer") && canOffer && !offerSeen()) {
+      e.preventDefault();
+      showOffer();
+      return;
+    }
+    // "View pricing" from the pop-up on the pricing page itself just puts it away.
+    if (inOffer && samePage && !url.hash) {
+      e.preventDefault();
+      closeOffer();
+      return;
+    }
     // The pop-up sits above everything, the curtain included, so it goes first.
-    if (canOffer && offer.open && offer.contains(a)) closeOffer(true);
-    if (samePage && url.hash) {
+    if (inOffer) closeOffer(true);
+    if (samePage) {
+      if (!url.hash) {
+        e.preventDefault();
+        goTo(null, "");
+        return;
+      }
       const el = document.getElementById(decodeURIComponent(url.hash.slice(1)));
       if (!el) return;
       e.preventDefault();
       goTo(el, url.hash);
-    } else if (!samePage && /^https?:$/.test(url.protocol) && curtain && !reduced) {
+    } else if (/^https?:$/.test(url.protocol) && curtain && !reduced) {
       e.preventDefault();
-      leave(url.href);
+      leave(url.href, /(^|\.)bttrfly\.studio$/.test(url.hostname) ? "Opening bttrfly Studio" : "");
     }
   });
 
   // Sections rise into view, each group in turn
   if (!reduced && "IntersectionObserver" in window) {
     const picks = Array.from(document.querySelectorAll(
-      ".section .eyebrow, .section h2, .section .lead, .step, .plan, .faq details, .closing .mark, .closing p, .closing .actions"
+      ".section .eyebrow, .section h1, .section h2, .section .lead, .step, .plan, .plans-note, .studio-shot, .feature-list li, .features-more, .faq details, .closing .mark, .closing p, .closing .actions"
     ));
     picks.forEach((el) => {
       const siblings = Array.from(el.parentElement.children).filter((c) => picks.includes(c));

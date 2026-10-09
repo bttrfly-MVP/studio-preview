@@ -11,6 +11,8 @@
  * Config comes from assets/film/film-config.js (written by tools/build_film.py):
  *   window.BTTRFLY_FILM = { moves: [{ d: "film/move-0-d.mp4", m: "...-m.mp4", dur: 5.04 }, ...],
  *                           stops: [{ d: "film/stop-0-d.jpg", m: "..." }, ...] }
+ * and, for the mist that hides the floating island's soil and roots, from
+ * assets/film/mist.js (written by tools/make_mist.py).
  */
 (() => {
   const cfg = window.BTTRFLY_FILM;
@@ -61,6 +63,68 @@
   };
   const variant = portrait ? "m" : "d"; // stills
 
+  // Mist over the floating island's soil and roots. One layer for daylight and one for the
+  // night finale, each a soft mask drawn on the opening frame; while the camera pulls back
+  // and dives in, a transform keeps it on the island and its opacity says how surely, so
+  // nothing is ever repainted (tools/make_mist.py measured both from the footage).
+  const mistCfg = window.BTTRFLY_MIST;
+  const stage = section.querySelector(".stage");
+  let mist = null;
+  const mistDay = document.getElementById("film-mist");
+  if (mistCfg && mistDay && stage) {
+    const mistNight = mistDay.cloneNode(false);
+    mistNight.removeAttribute("id");
+    mistDay.after(mistNight);
+    mistDay.style.backgroundImage = 'url("' + base + mistCfg.images.day + '")';
+    mistNight.style.backgroundImage = 'url("' + base + mistCfg.images.night + '")';
+    mist = { day: mistDay, night: mistNight, w: 0, h: 0, key: "" };
+  }
+  // The mist is drawn for the landscape frame. The picture covers the stage, and the phone
+  // film is the landscape film's middle 81/256, so there the mist reaches out beyond the
+  // picture on both sides.
+  const placeMist = () => {
+    if (!mist) return;
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    if (!sw || !sh) return;
+    const aspect = portrait ? 9 / 16 : 16 / 9;
+    let w = sw, h = sw / aspect;
+    if (h < sh) { h = sh; w = sh * aspect; }
+    if (portrait) w *= 256 / 81;
+    for (const el of [mist.day, mist.night]) {
+      el.style.width = w.toFixed(1) + "px";
+      el.style.height = h.toFixed(1) + "px";
+      el.style.left = ((sw - w) / 2).toFixed(1) + "px";
+      el.style.top = ((sh - h) / 2).toFixed(1) + "px";
+    }
+    mist.w = w;
+    mist.h = h;
+    mist.key = "";
+  };
+  // The mist for a moment of a move: [opacity, scale, x, y] ten times a second, blended.
+  // Where one side has no mist, the other side's placement is used as is.
+  const mistAt = (k, t) => {
+    const move = mistCfg.moves[k];
+    if (!move) return null;
+    const n = move.samples.length, x = Math.max(0, t * mistCfg.fps);
+    const i = Math.min(n - 1, Math.floor(x)), f = Math.min(1, x - i);
+    const a = move.samples[i], b = move.samples[Math.min(n - 1, i + 1)];
+    const p = !a[0] ? b : !b[0] ? a : null;
+    const mix = (j) => (p ? p[j] : a[j] + (b[j] - a[j]) * f);
+    return { tone: move.tone, o: a[0] + (b[0] - a[0]) * f, s: mix(1), x: mix(2), y: mix(3) };
+  };
+  const mistAtStop = (stop) => (stop === 0 ? mistAt(0, 0) : mistAt(stop - 1, cfg.moves[stop - 1].dur));
+  const setMist = (v) => {
+    const o = v ? Math.max(0, Math.min(1, v.o)) : 0;
+    const day = v && v.tone === "day" ? o : 0, night = v && v.tone === "night" ? o : 0;
+    const transform = o > 0.004 ? "translate(" + (v.x * mist.w).toFixed(1) + "px, " + (v.y * mist.h).toFixed(1) + "px) scale(" + v.s.toFixed(4) + ")" : "";
+    const key = day.toFixed(3) + " " + night.toFixed(3) + " " + transform;
+    if (key === mist.key) return;
+    mist.key = key;
+    mist.day.style.opacity = day.toFixed(3);
+    mist.night.style.opacity = night.toFixed(3);
+    if (transform) mist.day.style.transform = mist.night.style.transform = transform;
+  };
+
   // Scroll lengths, in viewport heights, and how closely the film follows the scroll
   // (seconds to close most of the gap). The finale's hold is short so that leaving the film
   // for the sections doesn't scroll through dead space.
@@ -85,6 +149,7 @@
   const layout = () => {
     vh = viewportHeight();
     if (vh > 0) section.style.height = Math.round((length + 1) * vh) + "px";
+    placeMist();
   };
   layout();
 
@@ -363,6 +428,14 @@
       card.style.visibility = o < 0.01 ? "hidden" : "visible";
       card.style.pointerEvents = o > 0.6 ? "auto" : "none";
       card.style.translate = "0 " + ((1 - o) * 18).toFixed(1) + "px";
+    }
+    if (mist) {
+      // Whatever is on screen: an idle loop, a move's video, or a stop's still.
+      const loop = loopStop >= 0 && mistCfg.loops[loopStop];
+      if (stillsMode) setMist(fadeStop >= 0 ? mistAtStop(fadeStop) : null);
+      else if (loop) setMist({ tone: loop.tone, o: loop.opacity, s: 1, x: 0, y: 0 });
+      else if (visibleK >= 0) setMist(mistAt(visibleK, vids[visibleK].currentTime));
+      else setMist(mistAtStop(stillStop));
     }
     const barWidth = ((shown / length) * 100).toFixed(2) + "%";
     if (barWidth !== lastBar) bar.style.width = lastBar = barWidth;
