@@ -5,42 +5,42 @@ window.BTTRFLY_FILM = {
       "d": "film/move-0-d.mp4",
       "mh": "film/move-0-mh.mp4",
       "m": "film/move-0-m.mp4",
-      "dur": 5.042
+      "dur": 5.542
     },
     {
       "h": "film/move-1-h.mp4",
       "d": "film/move-1-d.mp4",
       "mh": "film/move-1-mh.mp4",
       "m": "film/move-1-m.mp4",
-      "dur": 13.833
+      "dur": 14.333
     },
     {
       "h": "film/move-2-h.mp4",
       "d": "film/move-2-d.mp4",
       "mh": "film/move-2-mh.mp4",
       "m": "film/move-2-m.mp4",
-      "dur": 13.833
+      "dur": 14.333
     },
     {
       "h": "film/move-3-h.mp4",
       "d": "film/move-3-d.mp4",
       "mh": "film/move-3-mh.mp4",
       "m": "film/move-3-m.mp4",
-      "dur": 9.958
+      "dur": 10.958
     },
     {
       "h": "film/move-4-h.mp4",
       "d": "film/move-4-d.mp4",
       "mh": "film/move-4-mh.mp4",
       "m": "film/move-4-m.mp4",
-      "dur": 9.958
+      "dur": 10.458
     },
     {
       "h": "film/move-5-h.mp4",
       "d": "film/move-5-d.mp4",
       "mh": "film/move-5-mh.mp4",
       "m": "film/move-5-m.mp4",
-      "dur": 6.042
+      "dur": 6.542
     }
   ],
   "stops": [
@@ -79,7 +79,7 @@ window.BTTRFLY_FILM = {
       "d": "film/loop-0-d.mp4",
       "mh": "film/loop-0-mh.mp4",
       "m": "film/loop-0-m.mp4",
-      "dur": 4.792
+      "dur": 9.792
     },
     {
       "h": "film/loop-1-h.mp4",
