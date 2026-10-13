@@ -255,6 +255,10 @@
       if (!el) return;
       e.preventDefault();
       goTo(el, url.hash);
+    } else if (a.target === "_top" && window.top !== window.self) {
+      // Shown inside bttrfly.app/studio: the browser's own target="_top" takes the
+      // whole window. Setting location from script would only move the frame.
+      return;
     } else if (/^https?:$/.test(url.protocol) && curtain && !reduced) {
       e.preventDefault();
       leave(url.href, /(^|\.)bttrfly\.studio$/.test(url.hostname) ? "Opening bttrfly Studio" : "");
