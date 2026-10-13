@@ -73,7 +73,7 @@ p { margin: 0; }
 .brand span { font: 500 12px/1 var(--display); color: var(--purple-deep); letter-spacing: .06em; text-transform: uppercase; padding-left: 10px; border-left: 1px solid var(--line); }
 .nav-links { display: flex; align-items: center; gap: 8px; }
 .nav-pills { position: relative; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; background: var(--glass); box-shadow: 0 6px 20px rgba(60, 20, 80, 0.08); }
-.nav-pills .text { position: relative; z-index: 1; padding: 0 14px; min-height: 40px; display: inline-flex; align-items: center; border-radius: 999px; font: 500 14px/1 var(--display); text-decoration: none; transition: color .2s ease; }
+.nav-pills .text { position: relative; z-index: 1; padding: 0 14px; min-height: 40px; display: inline-flex; align-items: center; border-radius: 999px; font: 500 14px/1 var(--display); text-decoration: none; white-space: nowrap; transition: color .2s ease; }
 .nav-pills .text:hover, .nav-pills .text.active { color: var(--purple-deep); }
 .nav-pills .text:focus-visible { outline: 3px solid var(--purple-deep); outline-offset: 1px; }
 .nav-glow { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 999px; background: var(--tint); opacity: 0; transition: transform .45s var(--ease-out), width .45s var(--ease-out), opacity .25s ease; }
@@ -324,6 +324,13 @@ main.pricing ~ .offer .offer-plans { display: none; } /* already here */
 @keyframes offer-in { from { opacity: 0; transform: translateY(26px) scale(.96); } }
 @keyframes offer-out { to { opacity: 0; transform: translateY(12px) scale(.98); } }
 @keyframes offer-fade { from { opacity: 0; } }
+
+/* Tablets: five links and the button only just fit beside the wordmark */
+@media (min-width: 721px) and (max-width: 960px) {
+  .brand span { display: none; }
+  .nav-pills .text { padding: 0 10px; }
+  .nav-links .btn { padding: 0 18px; }
+}
 
 @media (max-width: 720px) {
   .nav-pills, .brand span { display: none; }
